@@ -15,7 +15,6 @@ MODULE module_mosaic_addemiss
 !     variables in module_data_mosaic_asect
 
 
-
    integer, parameter :: mosaic_addemiss_active = 1
                        ! only do emissions when this is positive
                        ! (when it is negative, emissions tendencies are zero)
@@ -23,6 +22,47 @@ MODULE module_mosaic_addemiss
    integer, parameter :: mosaic_addemiss_masscheck = -1
                        ! only do emissions masscheck calcs when this is positive
 
+   INTERFACE
+   subroutine mosaic_dust_gocartemis (dt,start_month,num_soil_layers,alt,  &            
+         u_phy,v_phy,chem,rho_phy,dz8w,smois,u10,v10,erod,                &
+         isltyp,xland,g,                                                  &
+         emis_dust,                                                       &
+         ids,ide, jds,jde, kds,kde,                                       &
+         ims,ime, jms,jme, kms,kme,                                       &
+         its,ite, jts,jte, kts,kte, num_chem, num_emis_dust)
+         INTEGER,      INTENT(IN   ) :: start_month,num_soil_layers,            &
+                                       ids,ide, jds,jde, kds,kde,               &
+                                       ims,ime, jms,jme, kms,kme,               &
+                                       its,ite, jts,jte, kts,kte,               &
+                                       num_chem, num_emis_dust
+         INTEGER,DIMENSION( ims:ime , jms:jme )                  ,               &
+               INTENT(IN   ) ::       isltyp
+ 
+         REAL, DIMENSION( ims:ime, kms:kme, jms:jme, num_chem ),                 &
+               INTENT(INOUT ) ::                                   chem
+ 
+         REAL, DIMENSION( ims:ime, 1, jms:jme,num_emis_dust),OPTIONAL,           &
+               INTENT(INOUT ) ::       emis_dust
+ 
+ 
+         REAL, DIMENSION( ims:ime, num_soil_layers, jms:jme ) ,      &
+               INTENT(INOUT) ::                               smois
+         REAL,  DIMENSION( ims:ime , jms:jme, 3 )                   ,               &
+                INTENT(IN   ) ::    erod
+         REAL,  DIMENSION( ims:ime , jms:jme )                   ,               &
+                INTENT(IN   ) ::                                                 &
+                                                     u10,                  &
+                                                     v10,                  &
+                                                     xland
+         REAL,  DIMENSION( ims:ime , kms:kme , jms:jme ),                        &
+                INTENT(IN   ) ::                                                 &
+                                                        alt,               &
+                                                     dz8w,                 &
+                                              u_phy,v_phy,rho_phy
+ 
+        REAL, INTENT(IN   ) :: dt,g
+   end subroutine mosaic_dust_gocartemis
+   END INTERFACE
 CONTAINS
 
 
@@ -748,7 +788,7 @@ size_loop: &
          emis_dust,                                                      &
          ids,ide, jds,jde, kds,kde,                                      &
          ims,ime, jms,jme, kms,kme,                                      &
-         its,ite, jts,jte, kts,kte) 
+         its,ite, jts,jte, kts,kte, num_chem, num_emis_dust) 
         endif
 
 
@@ -2019,10 +2059,12 @@ END MODULE module_mosaic_addemiss
          emis_dust,                                                       &
          ids,ide, jds,jde, kds,kde,                                       &
          ims,ime, jms,jme, kms,kme,                                       &
-         its,ite, jts,jte, kts,kte)
+         its,ite, jts,jte, kts,kte, num_chem, num_emis_dust)
   USE module_data_gocart_dust
-  USE module_configure
-  USE module_state_description
+! USE module_configure
+  USE module_state_description, ONLY : p_edust1, p_edust2, p_edust3,      &
+                                       p_edust4, p_edust5,                &
+                                       param_first_scalar
   USE module_model_constants, ONLY: mwdry
   USE module_data_mosaic_asect
   USE gocart_dust, ONLY: source_du
@@ -2031,7 +2073,8 @@ END MODULE module_mosaic_addemiss
    INTEGER,      INTENT(IN   ) :: start_month,num_soil_layers,            &
                                   ids,ide, jds,jde, kds,kde,               &
                                   ims,ime, jms,jme, kms,kme,               &
-                                  its,ite, jts,jte, kts,kte
+                                  its,ite, jts,jte, kts,kte,               &
+                                  num_chem, num_emis_dust
    INTEGER,DIMENSION( ims:ime , jms:jme )                  ,               &
           INTENT(IN   ) ::       isltyp
                                                      
