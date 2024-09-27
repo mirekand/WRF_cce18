@@ -1306,15 +1306,15 @@ NETCDFPAR_BUILD	=      CONFIGURE_NETCDFPAR_BUILD
 DESCRIPTION     =       CRAY CCE ($SFC/$SCC): Cray XE and XC
 # OpenMP is enabled by default for Cray CCE compiler
 # This turns it off
-NOOMP           =       -hnoomp
+NOOMP           =       -fnoopenmp
 DMPARALLEL      =       # 1
 OMPCPP          =       # -D_OPENMP
-OMP             =       # -homp
+OMP             =       -fopenmp # -homp
 OMPCC           =       # -homp
-SFC             =       ftn $(NOOMP)
+SFC             =       ftn
 SCC             =       cc 
 CCOMP           =       cc 
-DM_FC           =       ftn $(NOOMP)
+DM_FC           =       ftn
 DM_CC           =       cc
 FC              =       $(DM_FC)
 CC              =       $(DM_CC)
@@ -1329,7 +1329,7 @@ LDFLAGS_LOCAL   =
 #                        -L$(WRF_SRC_ROOT_DIR)/external/RSL_LITE -lrsl_lite
 CPLUSPLUSLIB    =       
 ESMF_LDFLAG     =       $(CPLUSPLUSLIB)
-FCOPTIM         =       # -Ofp3 
+FCOPTIM         =       -O2 # -Ofp3 
 FCREDUCEDOPT	=       $(FCOPTIM)
 FCNOOPT		=       -O1 -Ofp1 -Oipa0 -Onomodinline
 FCDEBUG         =       # -g -O0 # -K trap=fp -R bc
@@ -1337,7 +1337,7 @@ FORMAT_FIXED    =       -f fixed
 FORMAT_FREE     =       -f free
 FCSUFFIX        =
 BYTESWAPIO      =       -h byteswapio
-FCBASEOPTS_NO_G =       -N1023 $(FORMAT_FREE) $(BYTESWAPIO) #-ra
+FCBASEOPTS_NO_G =       -N1023 $(FORMAT_FREE) $(BYTESWAPIO) -dC -M 878 #-ra
 FCBASEOPTS      =       $(FCBASEOPTS_NO_G) $(FCDEBUG)
 MODULE_SRCH_FLAG =     
 TRADFLAG        =      CONFIGURE_TRADFLAG
@@ -1347,7 +1347,7 @@ ARFLAGS         =      ru
 M4              =      m4
 RANLIB          =      ranlib
 RLFLAGS		=	
-CC_TOOLS        =      gcc
+CC_TOOLS        =      cc
 NETCDFPAR_BUILD	=      CONFIGURE_NETCDFPAR_BUILD
 
 ###########################################################
