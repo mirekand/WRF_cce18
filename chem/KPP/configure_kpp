@@ -104,7 +104,7 @@ PCC=`grep -e CC ./configure.wrf | grep -v make | grep -e "=" | grep -v SCC | gre
 PSCC=`grep -e SCC ./configure.wrf | grep -v make | grep -e "="` 
 
 
-##PSCC="SCC = cc"
+PSCC="SCC = gcc"
 
 export PCC
 export PSCC
