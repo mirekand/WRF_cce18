@@ -1,4 +1,5 @@
 ### COPY OF WRF-ARW Modeling System  ###
+### this copy is to create WRF version working with CRAY cce compiler ###
 
 We request that all new users of WRF please register. This allows us to better determine how to support and develop the model. Please register using this form:[https://www2.mmm.ucar.edu/wrf/users/download/wrf-regist.php](https://www2.mmm.ucar.edu/wrf/users/download/wrf-regist.php).
 
