@@ -1637,6 +1637,216 @@ size_loop: &
 	end subroutine seasalt_emit_feuntes_1bin
 
 
+!====================================================================================
+! add another dust emission scheme following GOCART mechanism  --czhao  09/17/2009
+! Ukhov A. 02/28/2022. Code clean up and refactoring. Removed dublicate mosaic_source_du().
+! Instead original source_du() is called from module_gocart_dust.F
+!====================================================================================
+  subroutine mosaic_dust_gocartemis (dt,start_month,num_soil_layers,alt,  &            
+         u_phy,v_phy,chem,rho_phy,dz8w,smois,u10,v10,erod,                &
+         isltyp,xland,g,                                                  &
+         emis_dust,                                                       &
+         ids,ide, jds,jde, kds,kde,                                       &
+         ims,ime, jms,jme, kms,kme,                                       &
+         its,ite, jts,jte, kts,kte)
+  USE module_data_gocart_dust
+  USE module_configure
+  USE module_state_description
+  USE module_model_constants, ONLY: mwdry
+  USE module_data_mosaic_asect
+  USE gocart_dust, ONLY: source_du
+  IMPLICIT NONE
+
+   INTEGER,      INTENT(IN   ) :: start_month,num_soil_layers,            &
+                                  ids,ide, jds,jde, kds,kde,               &
+                                  ims,ime, jms,jme, kms,kme,               &
+                                  its,ite, jts,jte, kts,kte
+   INTEGER,DIMENSION( ims:ime , jms:jme )                  ,               &
+          INTENT(IN   ) ::       isltyp
+                                                     
+   REAL, DIMENSION( ims:ime, kms:kme, jms:jme, num_chem ),                 &
+         INTENT(INOUT ) ::                                   chem
+
+   REAL, DIMENSION( ims:ime, 1, jms:jme,num_emis_dust),OPTIONAL,           &
+         INTENT(INOUT ) ::       emis_dust
+         
+
+   REAL, DIMENSION( ims:ime, num_soil_layers, jms:jme ) ,      &
+      INTENT(INOUT) ::                               smois
+   REAL,  DIMENSION( ims:ime , jms:jme, 3 )                   ,               &
+          INTENT(IN   ) ::    erod
+   REAL,  DIMENSION( ims:ime , jms:jme )                   ,               &
+          INTENT(IN   ) ::                                                 &
+                                                     u10,                  &
+                                                     v10,                  &
+                                                     xland
+   REAL,  DIMENSION( ims:ime , kms:kme , jms:jme ),                        &
+          INTENT(IN   ) ::                                                 &
+                                                        alt,               &
+                                                     dz8w,                 &
+                                              u_phy,v_phy,rho_phy
+
+  REAL, INTENT(IN   ) :: dt,g
+!
+! local variables
+!
+  integer :: nmx,i,j,k,imx,jmx,lmx
+  integer,dimension (1,1) :: ilwi
+  real*8, DIMENSION (3) :: erodin
+  real*8, DIMENSION (5) :: tc,bems
+  real*8, dimension (1,1) :: w10m,gwet,airden
+  real*8  mass1part
+  real  factbb, fracoin, fracca, fracco3, fractot
+  real*8  converi
+  integer p1st,l_oin,l,n,l_ca, l_co3 
+  real :: densdust
+  real totalemis
+  integer iphase, itype
+  real :: dz_lowest
+  real sz(8)
+
+  p1st = param_first_scalar
+
+!czhao give an example of MOSAIC 8 size bins here (unit: um) from Jerome 2005 paper
+! 0.039-0.078; 0.078-0.156; 0.156-0.312; 0.312-0.625; 0.625-1.25; 1.25-2.5; 2.5-5.0; 5.0-10.0
+!in the model the size bound for 8 bins is calculated in the code using dlo_sec and dhi_sec
+!size3
+!       sz(1)=0.0
+!       sz(2)=0.0
+!       sz(3)=0.0003
+!       sz(4)=0.0048
+!       sz(5)=0.0130
+!       sz(6)=0.0250
+!       sz(7)=0.1400
+!       sz(8)=0.8169
+!the size is following the best match2 of modal distribution
+!we have ~3.6% within 1 um radius and ~7.4% within 1.25 um radius
+!versus ~6.0% within 1 um radius following GOCART original and ~9.3% within 1.25 um radius
+! totally ~82% are within the MOSAIC size range 0.03-10 um diameter
+! now the dust distribution follows the parameter defined in module_data_sorgam.F 
+        sz(1)=1.0e-8
+        sz(2)=1.0e-6
+        sz(3)=3.0e-4
+        sz(4)=3.5e-3
+        sz(5)=0.018
+        sz(6)=0.070
+        sz(7)=0.2595
+        sz(8)=0.42
+!        frac_10um=sum(sz(1:8))
+!        sz(:)=sz(:)/sum(sz(1:8))  ! relative ratio in diameter range of 0-10 um
+
+!  for now just do itype=1
+        itype = 1
+        iphase = ai_phase
+
+        ! added option for 4bin WRF
+        IF (nsize_aer(itype) == 4) THEN
+          sz(1) = sz(1) + sz(2)
+          sz(2) = sz(3) + sz(4)
+          sz(3) = sz(5) + sz(6)
+          sz(4) = sz(7) + sz(8)
+        ENDIF
+
+  converi=1.e9
+!
+! number of dust bins
+!
+  imx=1
+  jmx=1
+  lmx=1
+  nmx=ndust
+  k=kts
+  do j=jts,jte
+  do i=its,ite
+
+! no dust over water!!!
+!
+     if(xland(i,j).lt.1.5)then
+      ilwi(1,1)=1     
+
+      ! tc is dummy parameter. Just to conform with source_du() call from module_gocart_dust.F
+      tc(:) = 0.0
+
+      w10m=sqrt(u10(i,j)*u10(i,j)+v10(i,j)*v10(i,j))
+
+! we don't trust the u10,v10 values, if model layers are very thin near surface
+     if(dz8w(i,kts,j).lt.12.)w10m=sqrt(u_phy(i,kts,j)*u_phy(i,kts,j)+v_phy(i,kts,j)*v_phy(i,kts,j))
+     erodin(1)=erod(i,j,1)
+     erodin(2)=erod(i,j,2)
+     erodin(3)=erod(i,j,3)
+!
+!  volumetric soil moisture over porosity
+      gwet(1,1)=smois(i,k,j)/porosity(isltyp(i,j))
+      airden(1,1)=rho_phy(i,k,j)
+      dz_lowest = dz8w(i,k,j)
+
+      !call from module_gocart_dust.F
+      call source_du( imx,jmx,lmx,nmx, dt, tc, &
+                       erodin, ilwi, w10m, gwet, airden, &
+                       dz_lowest,bems,start_month,g)
+
+      ! bems: (kg/m2/timestep)
+
+      ! A. Ukhov
+      ! GOCART radii range for 1..5 bins: 0.1-10 um, where 4th bin: 3-6 um, 5th bin: 6-10 um.
+      ! MOSAIC radii range for 1..8 bins: 0.0195-5 um, where 8th bin: 2.5-5 um.
+      ! Therefore account only 1-4 GOCART bins, when calculating total dust flux from the surface.
+      ! ln(5/3)/ln(6/3)=0.74 is contribution from the 4 GOCART bin.
+      totalemis=(sum(bems(1:3))+bems(4)*0.74)*converi !ug/m2/timestep
+
+      ! A. Ukhov
+      ! for output diagnostics
+      ! bems (kg/m2) per dt
+      ! p_edust1...5 is accumulated dust emission (kg/m2)
+      emis_dust(i,1,j,p_edust1)=emis_dust(i,1,j,p_edust1)+bems(1)
+      emis_dust(i,1,j,p_edust2)=emis_dust(i,1,j,p_edust2)+bems(2)
+      emis_dust(i,1,j,p_edust3)=emis_dust(i,1,j,p_edust3)+bems(3)
+      emis_dust(i,1,j,p_edust4)=emis_dust(i,1,j,p_edust4)+bems(4)
+      emis_dust(i,1,j,p_edust5)=emis_dust(i,1,j,p_edust5)+bems(5)
+
+      factbb = (totalemis/dz8w(i,k,j))*alt(i,k,j) !(ug/kg)
+      fracoin = 0.97
+      fracca = 0.03*0.4
+      fracco3 = 0.03*0.6
+      fractot = fracoin + fracca + fracco3
+
+         do 1810 n = 1, nsize_aer(itype)
+            l_oin = lptr_oin_aer(n,itype,iphase)
+            l_ca = lptr_ca_aer(n,itype,iphase)
+            l_co3 = lptr_co3_aer(n,itype,iphase)
+
+            if (l_oin >= p1st) then
+                chem(i,k,j,l_oin) = chem(i,k,j,l_oin) +   &
+                factbb * sz(n) * fracoin
+             if (l_ca >= p1st)                            &
+                  chem(i,k,j,l_ca) = chem(i,k,j,l_ca) +     &
+                  factbb * sz(n) * fracca
+             if (l_co3 >= p1st)                           &
+                  chem(i,k,j,l_co3) = chem(i,k,j,l_co3) +   &
+                  factbb * sz(n) * fracco3
+
+               if (n <= 5) densdust=2.5
+               if (n > 5 ) densdust=2.65
+               ! added option for 4bin WRF
+               if (nsize_aer(itype) == 4) then
+                 if (n <= 2) densdust=2.5
+                 if (n > 2 ) densdust=2.65
+               endif
+
+            ! mass1part is mass of a single particle in ug
+               mass1part=0.523598*(dcen_sect(n,itype)**3)*densdust*1.0e06
+               l = numptr_aer(n,itype,iphase)
+             if (l >= p1st) chem(i,k,j,l) = chem(i,k,j,l) + factbb * sz(n) * fractot/ mass1part
+            end if
+1810    continue
+
+     endif ! xland
+  enddo ! i
+  enddo ! j
+
+
+end subroutine mosaic_dust_gocartemis
+!===========================================================================
 
 
 
@@ -2007,217 +2217,6 @@ END MODULE module_mosaic_addemiss
         return
 
    END subroutine mosaic_dust_emiss
-
-!====================================================================================
-! add another dust emission scheme following GOCART mechanism  --czhao  09/17/2009
-! Ukhov A. 02/28/2022. Code clean up and refactoring. Removed dublicate mosaic_source_du().
-! Instead original source_du() is called from module_gocart_dust.F
-!====================================================================================
-  subroutine mosaic_dust_gocartemis (dt,start_month,num_soil_layers,alt,  &            
-         u_phy,v_phy,chem,rho_phy,dz8w,smois,u10,v10,erod,                &
-         isltyp,xland,g,                                                  &
-         emis_dust,                                                       &
-         ids,ide, jds,jde, kds,kde,                                       &
-         ims,ime, jms,jme, kms,kme,                                       &
-         its,ite, jts,jte, kts,kte)
-  USE module_data_gocart_dust
-  USE module_configure
-  USE module_state_description
-  USE module_model_constants, ONLY: mwdry
-  USE module_data_mosaic_asect
-  USE gocart_dust, ONLY: source_du
-  IMPLICIT NONE
-
-   INTEGER,      INTENT(IN   ) :: start_month,num_soil_layers,            &
-                                  ids,ide, jds,jde, kds,kde,               &
-                                  ims,ime, jms,jme, kms,kme,               &
-                                  its,ite, jts,jte, kts,kte
-   INTEGER,DIMENSION( ims:ime , jms:jme )                  ,               &
-          INTENT(IN   ) ::       isltyp
-                                                     
-   REAL, DIMENSION( ims:ime, kms:kme, jms:jme, num_chem ),                 &
-         INTENT(INOUT ) ::                                   chem
-
-   REAL, DIMENSION( ims:ime, 1, jms:jme,num_emis_dust),OPTIONAL,           &
-         INTENT(INOUT ) ::       emis_dust
-         
-
-   REAL, DIMENSION( ims:ime, num_soil_layers, jms:jme ) ,      &
-      INTENT(INOUT) ::                               smois
-   REAL,  DIMENSION( ims:ime , jms:jme, 3 )                   ,               &
-          INTENT(IN   ) ::    erod
-   REAL,  DIMENSION( ims:ime , jms:jme )                   ,               &
-          INTENT(IN   ) ::                                                 &
-                                                     u10,                  &
-                                                     v10,                  &
-                                                     xland
-   REAL,  DIMENSION( ims:ime , kms:kme , jms:jme ),                        &
-          INTENT(IN   ) ::                                                 &
-                                                        alt,               &
-                                                     dz8w,                 &
-                                              u_phy,v_phy,rho_phy
-
-  REAL, INTENT(IN   ) :: dt,g
-!
-! local variables
-!
-  integer :: nmx,i,j,k,imx,jmx,lmx
-  integer,dimension (1,1) :: ilwi
-  real*8, DIMENSION (3) :: erodin
-  real*8, DIMENSION (5) :: tc,bems
-  real*8, dimension (1,1) :: w10m,gwet,airden
-  real*8  mass1part
-  real  factbb, fracoin, fracca, fracco3, fractot
-  real*8  converi
-  integer p1st,l_oin,l,n,l_ca, l_co3 
-  real :: densdust
-  real totalemis
-  integer iphase, itype
-  real :: dz_lowest
-  real sz(8)
-
-  p1st = param_first_scalar
-
-!czhao give an example of MOSAIC 8 size bins here (unit: um) from Jerome 2005 paper
-! 0.039-0.078; 0.078-0.156; 0.156-0.312; 0.312-0.625; 0.625-1.25; 1.25-2.5; 2.5-5.0; 5.0-10.0
-!in the model the size bound for 8 bins is calculated in the code using dlo_sec and dhi_sec
-!size3
-!       sz(1)=0.0
-!       sz(2)=0.0
-!       sz(3)=0.0003
-!       sz(4)=0.0048
-!       sz(5)=0.0130
-!       sz(6)=0.0250
-!       sz(7)=0.1400
-!       sz(8)=0.8169
-!the size is following the best match2 of modal distribution
-!we have ~3.6% within 1 um radius and ~7.4% within 1.25 um radius
-!versus ~6.0% within 1 um radius following GOCART original and ~9.3% within 1.25 um radius
-! totally ~82% are within the MOSAIC size range 0.03-10 um diameter
-! now the dust distribution follows the parameter defined in module_data_sorgam.F 
-        sz(1)=1.0e-8
-        sz(2)=1.0e-6
-        sz(3)=3.0e-4
-        sz(4)=3.5e-3
-        sz(5)=0.018
-        sz(6)=0.070
-        sz(7)=0.2595
-        sz(8)=0.42
-!        frac_10um=sum(sz(1:8))
-!        sz(:)=sz(:)/sum(sz(1:8))  ! relative ratio in diameter range of 0-10 um
-
-!  for now just do itype=1
-        itype = 1
-        iphase = ai_phase
-
-        ! added option for 4bin WRF
-        IF (nsize_aer(itype) == 4) THEN
-          sz(1) = sz(1) + sz(2)
-          sz(2) = sz(3) + sz(4)
-          sz(3) = sz(5) + sz(6)
-          sz(4) = sz(7) + sz(8)
-        ENDIF
-
-  converi=1.e9
-!
-! number of dust bins
-!
-  imx=1
-  jmx=1
-  lmx=1
-  nmx=ndust
-  k=kts
-  do j=jts,jte
-  do i=its,ite
-
-! no dust over water!!!
-!
-     if(xland(i,j).lt.1.5)then
-      ilwi(1,1)=1     
-
-      ! tc is dummy parameter. Just to conform with source_du() call from module_gocart_dust.F
-      tc(:) = 0.0
-
-      w10m=sqrt(u10(i,j)*u10(i,j)+v10(i,j)*v10(i,j))
-
-! we don't trust the u10,v10 values, if model layers are very thin near surface
-     if(dz8w(i,kts,j).lt.12.)w10m=sqrt(u_phy(i,kts,j)*u_phy(i,kts,j)+v_phy(i,kts,j)*v_phy(i,kts,j))
-     erodin(1)=erod(i,j,1)
-     erodin(2)=erod(i,j,2)
-     erodin(3)=erod(i,j,3)
-!
-!  volumetric soil moisture over porosity
-      gwet(1,1)=smois(i,k,j)/porosity(isltyp(i,j))
-      airden(1,1)=rho_phy(i,k,j)
-      dz_lowest = dz8w(i,k,j)
-
-      !call from module_gocart_dust.F
-      call source_du( imx,jmx,lmx,nmx, dt, tc, &
-                       erodin, ilwi, w10m, gwet, airden, &
-                       dz_lowest,bems,start_month,g)
-
-      ! bems: (kg/m2/timestep)
-
-      ! A. Ukhov
-      ! GOCART radii range for 1..5 bins: 0.1-10 um, where 4th bin: 3-6 um, 5th bin: 6-10 um.
-      ! MOSAIC radii range for 1..8 bins: 0.0195-5 um, where 8th bin: 2.5-5 um.
-      ! Therefore account only 1-4 GOCART bins, when calculating total dust flux from the surface.
-      ! ln(5/3)/ln(6/3)=0.74 is contribution from the 4 GOCART bin.
-      totalemis=(sum(bems(1:3))+bems(4)*0.74)*converi !ug/m2/timestep
-
-      ! A. Ukhov
-      ! for output diagnostics
-      ! bems (kg/m2) per dt
-      ! p_edust1...5 is accumulated dust emission (kg/m2)
-      emis_dust(i,1,j,p_edust1)=emis_dust(i,1,j,p_edust1)+bems(1)
-      emis_dust(i,1,j,p_edust2)=emis_dust(i,1,j,p_edust2)+bems(2)
-      emis_dust(i,1,j,p_edust3)=emis_dust(i,1,j,p_edust3)+bems(3)
-      emis_dust(i,1,j,p_edust4)=emis_dust(i,1,j,p_edust4)+bems(4)
-      emis_dust(i,1,j,p_edust5)=emis_dust(i,1,j,p_edust5)+bems(5)
-
-      factbb = (totalemis/dz8w(i,k,j))*alt(i,k,j) !(ug/kg)
-      fracoin = 0.97
-      fracca = 0.03*0.4
-      fracco3 = 0.03*0.6
-      fractot = fracoin + fracca + fracco3
-
-         do 1810 n = 1, nsize_aer(itype)
-            l_oin = lptr_oin_aer(n,itype,iphase)
-            l_ca = lptr_ca_aer(n,itype,iphase)
-            l_co3 = lptr_co3_aer(n,itype,iphase)
-
-            if (l_oin >= p1st) then
-                chem(i,k,j,l_oin) = chem(i,k,j,l_oin) +   &
-                factbb * sz(n) * fracoin
-             if (l_ca >= p1st)                            &
-                  chem(i,k,j,l_ca) = chem(i,k,j,l_ca) +     &
-                  factbb * sz(n) * fracca
-             if (l_co3 >= p1st)                           &
-                  chem(i,k,j,l_co3) = chem(i,k,j,l_co3) +   &
-                  factbb * sz(n) * fracco3
-
-               if (n <= 5) densdust=2.5
-               if (n > 5 ) densdust=2.65
-               ! added option for 4bin WRF
-               if (nsize_aer(itype) == 4) then
-                 if (n <= 2) densdust=2.5
-                 if (n > 2 ) densdust=2.65
-               endif
-
-            ! mass1part is mass of a single particle in ug
-               mass1part=0.523598*(dcen_sect(n,itype)**3)*densdust*1.0e06
-               l = numptr_aer(n,itype,iphase)
-             if (l >= p1st) chem(i,k,j,l) = chem(i,k,j,l) + factbb * sz(n) * fractot/ mass1part
-            end if
-1810    continue
-
-     endif ! xland
-  enddo ! i
-  enddo ! j
-
-
-end subroutine mosaic_dust_gocartemis
-!===========================================================================
 
 !----------------------------------------------------------------------
    subroutine addemiss_masscheck( id, config_flags, iflagaa, fromwhere,    &
